@@ -38,6 +38,8 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewPath, forKey: DefaultsKey.agentsviewPath
       )
+      sourceConfigurationGeneration += 1
+      lastUpdated = nil
     }
   }
   @Published var agentsviewServerURL: String {
@@ -45,6 +47,8 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewServerURL, forKey: DefaultsKey.agentsviewServerURL
       )
+      sourceConfigurationGeneration += 1
+      lastUpdated = nil
     }
   }
   @Published private(set) var machineLabelSnapshot: MachineLabels?
@@ -58,7 +62,7 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private let defaults = UserDefaults.standard
+  private let defaults: UserDefaults
   private let agentPreferences: AgentPreferences
   private let settingsWindowController = SettingsWindowController()
   private let welcomeWindowController = WelcomeWindowController()
@@ -68,8 +72,14 @@ final class AppModel: ObservableObject {
   private var isUpdatingLoginItem = false
   private let store: UsageStore
   private let refreshService: UsageRefreshService
+  private var sourceConfigurationGeneration = 0
 
-  init() {
+  init(
+    defaults: UserDefaults = .standard,
+    store suppliedStore: UsageStore? = nil,
+    fetcher: UsageFetching = UsageFetcher()
+  ) {
+    self.defaults = defaults
     timezoneRefreshState = UsageRefreshTimezoneState(
       lastSuccessfulTimeZone: defaults.string(forKey: DefaultsKey.lastUsageTimeZone),
       lastInvalidatedTimeZone: defaults.string(forKey: DefaultsKey.lastUsageInvalidatedTimeZone))
@@ -106,12 +116,12 @@ final class AppModel: ObservableObject {
     }
 
     do {
-      store = try UsageStore.defaultStore()
+      store = try suppliedStore ?? UsageStore.defaultStore()
     } catch {
       store = try! UsageStore(path: ":memory:")
       statusMessage = "Database unavailable. Running without persistence."
     }
-    refreshService = UsageRefreshService(fetcher: UsageFetcher(), store: store)
+    refreshService = UsageRefreshService(fetcher: fetcher, store: store)
     timeZoneObserver = NotificationCenter.default.addObserver(
       forName: .NSSystemTimeZoneDidChange,
       object: nil,
@@ -143,13 +153,26 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func refreshNow() {
+  func refreshIfNeeded(now: Date = Date()) {
+    let context = UsageDateContext(now: now)
+    if let lastUpdated, statusMessage == nil,
+      !timezoneRefreshState.shouldInvalidateCurrentDay(for: context.timeZone.identifier),
+      lastUpdated >= context.startOfToday, lastUpdated <= now,
+      now.timeIntervalSince(lastUpdated) < Double(refreshInterval.seconds)
+    {
+      return
+    }
+    refreshNow(now: now)
+  }
+
+  func refreshNow(now: Date = Date()) {
     guard !isRefreshing else { return }
 
     isRefreshing = true
     statusMessage = nil
 
-    let context = UsageDateContext()
+    let sourceGeneration = sourceConfigurationGeneration
+    let context = UsageDateContext(now: now)
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
     if invalidateCurrentDay {
@@ -161,7 +184,6 @@ final class AppModel: ObservableObject {
         let result = try refreshService.refresh(
           context: context,
           invalidateCurrentDay: invalidateCurrentDay)
-        let refreshTime = Date()
 
         DispatchQueue.main.async {
           guard UsageDateContext().timeZone.identifier == context.timeZone.identifier else {
@@ -180,7 +202,9 @@ final class AppModel: ObservableObject {
           }
           if result.importErrors.isEmpty {
             self.statusMessage = nil
-            self.lastUpdated = refreshTime
+            if self.sourceConfigurationGeneration == sourceGeneration {
+              self.lastUpdated = context.now
+            }
           } else {
             self.statusMessage = result.importErrors.joined(separator: " | ")
           }
