@@ -8,11 +8,17 @@ struct UsageDateContext: Sendable {
   let usageWindowStartKey: String
   let startOfToday: Date
   let startOfNextDay: Date
+  let includeAutomated: Bool
+  // Captured once per refresh so every request in it reaches the same backend.
+  let serverURL: String
   let includesYear: Bool
   let yearStart: Date
   let yearEnd: Date
 
-  init(now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent, includesYear: Bool = false) {
+  init(
+    now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent, includesYear: Bool = false,
+    includeAutomated: Bool = true, serverURL: String = ""
+  ) {
     let capturedTimeZone = TimeZone(identifier: timeZone.identifier) ?? timeZone
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = capturedTimeZone
@@ -30,6 +36,8 @@ struct UsageDateContext: Sendable {
       preconditionFailure("Unable to calculate usage date bounds")
     }
 
+    self.includeAutomated = includeAutomated
+    self.serverURL = serverURL
     self.now = now
     self.timeZone = capturedTimeZone
     self.calendar = calendar

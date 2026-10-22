@@ -201,11 +201,11 @@ final class YearlyHistoryTests: XCTestCase {
     model.agentsviewServerURL = "https://example.com"
     model.refreshIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.yearRequests, 4)
+    XCTAssertEqual(fetcher.yearRequests, 6)
 
     model.refreshIfNeeded(now: UsageDateContext().startOfNextDay)
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.yearRequests, 6)
+    XCTAssertEqual(fetcher.yearRequests, 10)
   }
 
   @MainActor
@@ -315,7 +315,7 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
     }
   }
 
-  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? { nil }
 
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]

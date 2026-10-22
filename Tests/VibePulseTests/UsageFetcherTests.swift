@@ -77,6 +77,45 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertEqual(query.first { $0.name == "timezone" }?.value, "America/New_York")
   }
 
+  func testServerRequestsRespectAutomatedSessionPreference() throws {
+    for include in [true, false] {
+      for agent in [nil, "codex"] as [String?] {
+        let url = try UsageFetcher.makeServerURL(
+          configuredURL: "https://example.com", agent: agent,
+          context: UsageDateContext(includeAutomated: include))
+        let query = try XCTUnwrap(
+          URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(
+          query.first { $0.name == "include_automated" }?.value, include ? "true" : "false")
+      }
+    }
+  }
+
+  func testCLIRefusesRequestsThatExcludeAutomation() throws {
+    let lock = NSLock()
+    var commands: [[String]] = []
+    let fetcher = UsageFetcher(commandRunner: { arguments in
+      lock.withLock { commands.append(arguments) }
+      throw UsageFetcher.FetchError.invalidOutput
+    })
+    let filtered = UsageDateContext(includeAutomated: false)
+
+    for request in [
+      { _ = try fetcher.discoverAgents(using: filtered) },
+      { _ = try fetcher.fetchDailyTotals(for: .codex, using: filtered) },
+    ] {
+      XCTAssertThrowsError(try request()) { error in
+        guard case UsageFetcher.FetchError.automationFilterUnsupported = error else {
+          return XCTFail("unexpected error: \(error)")
+        }
+      }
+    }
+    XCTAssertTrue(lock.withLock { commands.isEmpty })
+
+    XCTAssertThrowsError(try fetcher.discoverAgents(using: UsageDateContext()))
+    XCTAssertFalse(lock.withLock { commands.isEmpty })
+  }
+
   func testMachinesURLUsesConfiguredServerBase() throws {
     let url = try UsageFetcher.makeMachinesURL(configuredURL: "http://127.0.0.1:18080/")
 
